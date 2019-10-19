@@ -257,7 +257,10 @@ class Ports(object):
         :rtype: Port
         """
         # TODO add security
-        return self._ports[item]
+        port = self._ports.get(item, None)
+        if port is None:
+            raise KeyError("Invalid port {0}, available: {1}".format(item, ", ".join(self._ports.keys())))
+        return port
 
     def __getattr__(self, item):
         # TODO add security
