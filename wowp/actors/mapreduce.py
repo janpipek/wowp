@@ -84,6 +84,7 @@ class Map(Actor):
         kwargs (dict): keyword arguments for actor.__init__
         scheduler (Scheduler): scheduler to use, default is not to change the scheduler
         name (string): actor name
+        single_value_ports (tuple): names of ports that are popped just once for the whole collection
 
     Ports:
         in (iterable): contains items to be passed to the mapped actor
@@ -92,7 +93,7 @@ class Map(Actor):
 
     _system_actor = True
 
-    def __init__(self, actor_class, args=(), kwargs={}, scheduler=None, name='map'):
+    def __init__(self, actor_class, args=(), kwargs={}, scheduler=None, name='map', single_value_ports=()):
         super().__init__(name=name)
         self.actor_class = actor_class
         self.actor_args = args
@@ -104,6 +105,7 @@ class Map(Actor):
             self.inports.append(pname)
         for pname in actor.outports.keys():
             self.outports.append(pname)
+        self.single_value_ports = single_value_ports
 
     def get_run_args(self):
         return (), {}
@@ -129,7 +131,8 @@ class Map(Actor):
         concat_actor = MultiConcat()
         # items will iterate over all ports inputs, i.e. will contain n-th actor input
         # TODO ensure equal input lengths
-        for items in zip(*(port.pop() for port in self.inports)):
+        single_items = [(self.inports[name], self.inports[name].pop()) for name in self.single_value_ports]
+        for items in zip(*(port.pop() for port in self.inports if port.name not in self.single_value_ports)):
             # get actor instance
             actor = self.actor_class(*self.actor_args, **self.actor_kwargs)
             map_actors.append(actor)
@@ -138,6 +141,8 @@ class Map(Actor):
             for port, value in zip(actor.inports, items):
                 # value is a single input item of the port
                 map_scheduler.put_value(port, value)
+            for port, value in single_items:
+                map_scheduler.put_value(actor.inports[port.name], value)
         # run the mapping sub-workflows
         # map_workflow = concat_actor.get_workflow()
         # result = map_scheduler.run_workflow(map_workflow)
