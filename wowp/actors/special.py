@@ -1,3 +1,5 @@
+import itertools
+
 from . import Actor
 from ..schedulers import LinearizedScheduler
 
@@ -87,34 +89,45 @@ class Chain(Actor):
         :param name:
         :param actor_generators: iterable of actor classes or generators
         :param kwargs:
-        :return:
         """
         super(Chain, self).__init__(name=name)
-        self.actors = []
         if len(actor_generators) < 1:
             raise RuntimeError("Chain needs at least one item.")
-        self.inports.append("inp")
-        self.outports.append("out")
+        actor_generators = list(actor_generators)
+        for inport in actor_generators[0](**kwargs).inports:
+            self.inports.append(inport.name)
+        for outport in actor_generators[-1](**kwargs).outports:
+            self.outports.append(outport.name)
+        # self.outports.append("out")
         self.actor_generators = actor_generators
 
+    @staticmethod
+    def chain_actors(actors):
+        iter1, iter2 = itertools.tee(actors, 2)
+        next(iter2)  # drop
+        for first, second in zip(iter1, iter2):
+            if len(first.outports) == 1 and len(second.inports) == 1:
+                inport = second.inports.at(0)
+                inport += first.outports.at(0)
+            else:
+                for outport in first.outports:
+                    second.inports[outport.name] += outport
+            # TODO: Add some checks
+
     def get_run_args(self):
-        return (self.inports["inp"].pop(), ), {"generators": self.actor_generators}
+        kv = {port.name: port.pop() for port in self.inports}
+        return (kv,), {"generators": self.actor_generators}
 
     @staticmethod
     def run(*args, **kwargs):
-        input = args[0]
+        print(args)
+        inports_kv = args[0]
         actor_generators = kwargs.pop("generators")
-        actors = []
-        for generator in actor_generators:
-            actor = generator()
-            assert len(actor.inports) == 1
-            assert len(actor.outports) == 1
-            if actors:
-                inport = actor.inports.at(0)
-                inport += actors[-1].outports.at(0)
-            actors.append(actor)
-
+        actors = [generator() for generator in actor_generators]
+        Chain.chain_actors(actors)
         scheduler = LinearizedScheduler()
-        scheduler.put_value(actors[0].inports.at(0), input)
+        for key, value in inports_kv.items():
+            scheduler.put_value(actors[0].inports[key], value)
         scheduler.execute()
-        return {"out": actors[-1].outports.at(0).pop()}
+        return { port.name: port.pop() for port in actors[-1].outports }
+        # return {"out": actors[-1].outports.at(0).pop()}
